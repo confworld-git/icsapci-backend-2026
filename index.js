@@ -176,61 +176,110 @@ app.post("/Speaker/Uploads", upload.single("Image"), async (req, res) => {
 app.post("/order", async (req, res) => {
   try {
     const { option, FormData, pricingData } = req.body;
-
+ 
     if (!option || !option.amount) {
       return res.status(400).json({ error: "Missing required payment fields" });
     }
-
+ 
     const amountInCents = Math.round(parseFloat(option.amount) * 100);
-
+ 
     const order = await razorpay.orders.create({
       amount: amountInCents,
       currency: "USD",
       receipt: `receipt_${new mongoose.Types.ObjectId()}`,
     });
-
+ 
     if (!order) {
       return res.status(500).json({ error: "Failed to create Razorpay order" });
     }
-
-    // If coupon was used, increment usage count
+ 
+    // Increment coupon usage count if a coupon was used
     if (pricingData?.couponCode) {
       await Coupon.findOneAndUpdate(
         { code: pricingData.couponCode.toUpperCase() },
         { $inc: { usedCount: 1 } }
       );
     }
-
+ 
     const registrationData = new Registration({
-      amount: order.amount,
+      amount:   order.amount,
       currency: order.currency,
-      receipt: order.receipt,
-      status: order.status,
-      id: order.id,
-      baseAmount: pricingData?.baseAmount || option.amount,
+      receipt:  order.receipt,
+      status:   order.status,
+      id:       order.id,
+ 
+      // Base fee (fee table only)
+      baseAmount:  pricingData?.baseAmount  || option.amount,
       finalAmount: pricingData?.finalAmount || option.amount,
-      hasMembership: pricingData?.hasMembership || false,
-      membershipFee: pricingData?.membershipFee || 0,
-      couponCode: pricingData?.couponCode || null,
-      couponDiscount: pricingData?.couponDiscount || 0,
+ 
+      // ── NEW: Journal & Addons ──────────────────────────────────
+      journalSupport: pricingData?.journalSupport || null,
+      journalAmount:  pricingData?.journalAmount  || 0,
+      addons:         pricingData?.addons         || [],
+      addonsAmount:   pricingData?.addonsAmount   || 0,
+ 
+      // Membership & Coupon
+      hasMembership:      pricingData?.hasMembership      || false,
+      membershipFee:      pricingData?.membershipFee      || 0,
+      couponCode:         pricingData?.couponCode         || null,
+      couponDiscount:     pricingData?.couponDiscount     || 0,
       membershipDiscount: pricingData?.membershipDiscount || 0,
+ 
       FormData: {
-        Title: FormData.Title,
-        first_name: FormData.first_name,
-        last_name: FormData.last_name,
-        certificate_name: FormData.certificate_name,
-        DOB: FormData.DOB,
-        nationality: FormData.nationality,
-        department: FormData.department,
-        institution: FormData.institution,
-        number: FormData.number,
-        email: FormData.email,
-        participant_category: FormData.participant_category,
+        Title:                 FormData.Title,
+        first_name:            FormData.first_name,
+        last_name:             FormData.last_name,
+        certificate_name:      FormData.certificate_name,
+        DOB:                   FormData.DOB,
+        nationality:           FormData.nationality,
+        department:            FormData.department,
+        institution:           FormData.institution,
+        number:                FormData.number,
+        email:                 FormData.email,
+        participant_category:  FormData.participant_category,
         presentation_Category: FormData.presentation_Category,
-        presentation_Type: FormData.presentation_Type,
+        presentation_Type:     FormData.presentation_Type,
       },
     });
-
+ 
+    // ── Build journal row for email ───────────────────────────────
+    const journalRow = pricingData?.journalSupport
+      ? `
+        <tr>
+          <td style="padding:10px;border:1px solid #ddd;font-size:15px;">Journal Support Tier</td>
+          <td style="padding:10px;border:1px solid #ddd;font-size:15px;">${pricingData.journalSupport.tier}</td>
+        </tr>
+        <tr>
+          <td style="padding:10px;border:1px solid #ddd;font-size:15px;">Journal Support Package</td>
+          <td style="padding:10px;border:1px solid #ddd;font-size:15px;">${pricingData.journalSupport.package}</td>
+        </tr>
+        <tr>
+          <td style="padding:10px;border:1px solid #ddd;font-size:15px;">Journal Support Amount</td>
+          <td style="padding:10px;border:1px solid #ddd;font-size:15px;">$${pricingData.journalSupport.amount}</td>
+        </tr>
+      `
+      : "";
+ 
+    // ── Build addons rows for email ───────────────────────────────
+    const addonsRows =
+      pricingData?.addons?.length > 0
+        ? pricingData.addons
+            .map(
+              (a) => `
+          <tr>
+            <td style="padding:10px;border:1px solid #ddd;font-size:15px;">
+              Add-on: ${a.label}${a.sublabel ? ` (${a.sublabel})` : ""}
+            </td>
+            <td style="padding:10px;border:1px solid #ddd;font-size:15px;">$${a.amount}</td>
+          </tr>`
+            )
+            .join("") +
+          `<tr>
+            <td style="padding:10px;border:1px solid #ddd;font-size:15px;font-weight:bold;">Add-ons Total</td>
+            <td style="padding:10px;border:1px solid #ddd;font-size:15px;font-weight:bold;">$${pricingData.addonsAmount}</td>
+          </tr>`
+        : "";
+ 
     const HtmlContent = `
 <!DOCTYPE html>
 <html lang="en">
@@ -239,125 +288,83 @@ app.post("/order", async (req, res) => {
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
-<body style="margin: 0; padding: 20px; font-family: 'Montserrat', sans-serif; background-color: #f4f4f4;">
-    <div style="width: 100%; max-width: 600px; margin: auto; background-color: #ffffff; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);">
-        <h2 style="color: #278803; text-align: center; font-size: 28px; margin-bottom: 40px;">New Registration from ICSAPCI</h2>
-        
-        <div style="margin: 20px 0;">
-            <h3 style="font-size: 18px;">Payment Details</h3>
-            <table width="100%" style="border-collapse: collapse;">
-                <tr>
-                    <th style="padding: 10px; border: 1px solid #dddddd; text-align: left; background-color: #f2f2f2; font-size: 15px;">Field</th>
-                    <th style="padding: 10px; border: 1px solid #dddddd; text-align: left; background-color: #f2f2f2; font-size: 15px;">Value</th>
-                </tr>
-                <tr>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">Base Registration Fee</td>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">$${pricingData?.baseAmount || option.amount}</td>
-                </tr>
-                ${pricingData?.hasMembership && pricingData?.couponCode ? `
-                <tr>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px; color: #28a745;">Combined Discount (10%)</td>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px; color: #28a745;">-$${((pricingData.baseAmount || 0) * 0.10).toFixed(2)}</td>
-                </tr>
-                ` : ''}
-                ${pricingData?.hasMembership && !pricingData?.couponCode ? `
-                <tr>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px; color: #28a745;">Membership Discount (5%)</td>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px; color: #28a745;">-$${(pricingData.membershipDiscount || 0).toFixed(2)}</td>
-                </tr>
-                ` : ''}
-                ${!pricingData?.hasMembership && pricingData?.couponCode ? `
-                <tr>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px; color: #28a745;">Coupon Discount (5%)</td>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px; color: #28a745;">-$${(pricingData.couponDiscount || 0).toFixed(2)}</td>
-                </tr>
-                ` : ''}
-                ${pricingData?.hasMembership ? `
-                <tr>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">Membership Fee</td>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">+$${(pricingData.membershipFee || 0).toFixed(2)}</td>
-                </tr>
-                ` : ''}
-                ${pricingData?.couponCode ? `
-                <tr>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">Coupon Code Applied</td>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">${pricingData.couponCode}</td>
-                </tr>
-                ` : ''}
-                <tr style="background-color: #f2f2f2;">
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 16px; font-weight: bold;">Final Amount Paid</td>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 16px; font-weight: bold;">$${(order.amount / 100).toFixed(2)}</td>
-                </tr>
-            </table>
-        </div>
-
-        <div style="margin: 20px 0;">
-            <h3 style="font-size: 18px;">Registration Details</h3>
-            <table width="100%" style="border-collapse: collapse;">
-                <tr>
-                    <th style="padding: 10px; border: 1px solid #dddddd; text-align: left; background-color: #f2f2f2; font-size: 15px;">Field</th>
-                    <th style="padding: 10px; border: 1px solid #dddddd; text-align: left; background-color: #f2f2f2; font-size: 15px;">Value</th>
-                </tr>
-                <tr>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">Title</td>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">${FormData.Title}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">First Name</td>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">${FormData.first_name}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">Last Name</td>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">${FormData.last_name}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">Certificate Name</td>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">${FormData.certificate_name}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">Date of Birth</td>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">${new Date(FormData.DOB).toISOString().split("T")[0]}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">Nationality</td>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">${FormData.nationality}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">Department</td>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">${FormData.department}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">Institution</td>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">${FormData.institution}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">Number</td>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">${FormData.number}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">Email</td>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">${FormData.email}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">Participant Category</td>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">${FormData.participant_category}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">Presentation Category</td>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">${FormData.presentation_Category}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">Presentation Type</td>
-                    <td style="padding: 10px; border: 1px solid #dddddd; text-align: left; font-size: 15px;">${FormData.presentation_Type}</td>
-                </tr>
-            </table>
-        </div>
-        <p style="font-size: 14px; text-align: center; margin-top: 20px;">Thank you for your registration!</p>
+<body style="margin:0;padding:20px;font-family:'Montserrat',sans-serif;background-color:#f4f4f4;">
+  <div style="width:100%;max-width:600px;margin:auto;background:#fff;padding:20px;border-radius:8px;box-shadow:0 0 10px rgba(0,0,0,0.1);">
+    <h2 style="color:#278803;text-align:center;font-size:28px;margin-bottom:40px;">New Registration from ICSAPCI</h2>
+ 
+    <div style="margin:20px 0;">
+      <h3 style="font-size:18px;">Payment Details</h3>
+      <table width="100%" style="border-collapse:collapse;">
+        <tr>
+          <th style="padding:10px;border:1px solid #ddd;background:#f2f2f2;font-size:15px;text-align:left;">Field</th>
+          <th style="padding:10px;border:1px solid #ddd;background:#f2f2f2;font-size:15px;text-align:left;">Value</th>
+        </tr>
+        <tr>
+          <td style="padding:10px;border:1px solid #ddd;font-size:15px;">Base Registration Fee</td>
+          <td style="padding:10px;border:1px solid #ddd;font-size:15px;">$${pricingData?.baseAmount || option.amount}</td>
+        </tr>
+        ${journalRow}
+        ${addonsRows}
+        ${pricingData?.hasMembership && pricingData?.couponCode ? `
+        <tr>
+          <td style="padding:10px;border:1px solid #ddd;font-size:15px;color:#28a745;">Combined Discount (10%)</td>
+          <td style="padding:10px;border:1px solid #ddd;font-size:15px;color:#28a745;">-$${((pricingData.baseAmount || 0) * 0.10).toFixed(2)}</td>
+        </tr>` : ""}
+        ${pricingData?.hasMembership && !pricingData?.couponCode ? `
+        <tr>
+          <td style="padding:10px;border:1px solid #ddd;font-size:15px;color:#28a745;">Membership Discount (5%)</td>
+          <td style="padding:10px;border:1px solid #ddd;font-size:15px;color:#28a745;">-$${(pricingData.membershipDiscount || 0).toFixed(2)}</td>
+        </tr>` : ""}
+        ${!pricingData?.hasMembership && pricingData?.couponCode ? `
+        <tr>
+          <td style="padding:10px;border:1px solid #ddd;font-size:15px;color:#28a745;">Coupon Discount (5%)</td>
+          <td style="padding:10px;border:1px solid #ddd;font-size:15px;color:#28a745;">-$${(pricingData.couponDiscount || 0).toFixed(2)}</td>
+        </tr>` : ""}
+        ${pricingData?.hasMembership ? `
+        <tr>
+          <td style="padding:10px;border:1px solid #ddd;font-size:15px;">Membership Fee</td>
+          <td style="padding:10px;border:1px solid #ddd;font-size:15px;">+$${(pricingData.membershipFee || 0).toFixed(2)}</td>
+        </tr>` : ""}
+        ${pricingData?.couponCode ? `
+        <tr>
+          <td style="padding:10px;border:1px solid #ddd;font-size:15px;">Coupon Code Applied</td>
+          <td style="padding:10px;border:1px solid #ddd;font-size:15px;">${pricingData.couponCode}</td>
+        </tr>` : ""}
+        <tr style="background:#f2f2f2;">
+          <td style="padding:10px;border:1px solid #ddd;font-size:16px;font-weight:bold;">Final Amount Paid</td>
+          <td style="padding:10px;border:1px solid #ddd;font-size:16px;font-weight:bold;">$${(order.amount / 100).toFixed(2)}</td>
+        </tr>
+      </table>
     </div>
+ 
+    <div style="margin:20px 0;">
+      <h3 style="font-size:18px;">Registration Details</h3>
+      <table width="100%" style="border-collapse:collapse;">
+        <tr>
+          <th style="padding:10px;border:1px solid #ddd;background:#f2f2f2;font-size:15px;text-align:left;">Field</th>
+          <th style="padding:10px;border:1px solid #ddd;background:#f2f2f2;font-size:15px;text-align:left;">Value</th>
+        </tr>
+        <tr><td style="padding:10px;border:1px solid #ddd;font-size:15px;">Title</td><td style="padding:10px;border:1px solid #ddd;font-size:15px;">${FormData.Title}</td></tr>
+        <tr><td style="padding:10px;border:1px solid #ddd;font-size:15px;">First Name</td><td style="padding:10px;border:1px solid #ddd;font-size:15px;">${FormData.first_name}</td></tr>
+        <tr><td style="padding:10px;border:1px solid #ddd;font-size:15px;">Last Name</td><td style="padding:10px;border:1px solid #ddd;font-size:15px;">${FormData.last_name}</td></tr>
+        <tr><td style="padding:10px;border:1px solid #ddd;font-size:15px;">Certificate Name</td><td style="padding:10px;border:1px solid #ddd;font-size:15px;">${FormData.certificate_name}</td></tr>
+        <tr><td style="padding:10px;border:1px solid #ddd;font-size:15px;">Date of Birth</td><td style="padding:10px;border:1px solid #ddd;font-size:15px;">${new Date(FormData.DOB).toISOString().split("T")[0]}</td></tr>
+        <tr><td style="padding:10px;border:1px solid #ddd;font-size:15px;">Nationality</td><td style="padding:10px;border:1px solid #ddd;font-size:15px;">${FormData.nationality}</td></tr>
+        <tr><td style="padding:10px;border:1px solid #ddd;font-size:15px;">Department</td><td style="padding:10px;border:1px solid #ddd;font-size:15px;">${FormData.department}</td></tr>
+        <tr><td style="padding:10px;border:1px solid #ddd;font-size:15px;">Institution</td><td style="padding:10px;border:1px solid #ddd;font-size:15px;">${FormData.institution}</td></tr>
+        <tr><td style="padding:10px;border:1px solid #ddd;font-size:15px;">Mobile Number</td><td style="padding:10px;border:1px solid #ddd;font-size:15px;">${FormData.number}</td></tr>
+        <tr><td style="padding:10px;border:1px solid #ddd;font-size:15px;">Email</td><td style="padding:10px;border:1px solid #ddd;font-size:15px;">${FormData.email}</td></tr>
+        <tr><td style="padding:10px;border:1px solid #ddd;font-size:15px;">Participant Category</td><td style="padding:10px;border:1px solid #ddd;font-size:15px;">${FormData.participant_category}</td></tr>
+        <tr><td style="padding:10px;border:1px solid #ddd;font-size:15px;">Presentation Category</td><td style="padding:10px;border:1px solid #ddd;font-size:15px;">${FormData.presentation_Category}</td></tr>
+        <tr><td style="padding:10px;border:1px solid #ddd;font-size:15px;">Presentation Type</td><td style="padding:10px;border:1px solid #ddd;font-size:15px;">${FormData.presentation_Type}</td></tr>
+      </table>
+    </div>
+    <p style="font-size:14px;text-align:center;margin-top:20px;">Thank you for your registration!</p>
+  </div>
 </body>
 </html>
 `;
-
+ 
     await registrationData.save();
     res.status(200).json(order);
     await sendEmailToAdmin("New Registration from ICSAPCI", HtmlContent);

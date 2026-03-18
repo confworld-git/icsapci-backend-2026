@@ -12,96 +12,57 @@ const registrationSchema = new mongoose.Schema(
         message: "Amount must be greater than 0",
       },
     },
-    currency: {
-      type: String,
-      required: true,
+    currency: { type: String, required: true },
+    receipt: { type: String, required: true, unique: true },
+    status: { type: String, required: true },
+    id: { type: String, required: true },
+
+    // Pricing breakdown
+    baseAmount: { type: Number, required: true },
+    finalAmount: { type: Number, required: true },
+
+    // ── NEW: Journal Publication Support ──────────────────────────
+    journalSupport: {
+      tier:    { type: String, default: null },
+      package: { type: String, default: null },
+      amount:  { type: Number, default: 0 },
     },
-    receipt: {
-      type: String,
-      required: true,
-      unique: true,
-    },
-    status: {
-      type: String,
-      required: true,
-    },
-    id: {
-      type: String,
-      required: true,
-    },
-    // NEW FIELDS FOR PRICING BREAKDOWN
-    baseAmount: {
-      type: Number,
-      required: true,
-    },
-    finalAmount: {
-      type: Number,
-      required: true,
-    },
-    hasMembership: {
-      type: Boolean,
-      default: false,
-    },
-    membershipFee: {
-      type: Number,
-      default: 0,
-    },
-    couponCode: {
-      type: String,
-      default: null,
-      uppercase: true,
-    },
-    couponDiscount: {
-      type: Number,
-      default: 0,
-    },
-    membershipDiscount: {
-      type: Number,
-      default: 0,
-    },
+    journalAmount: { type: Number, default: 0 },
+
+    // ── NEW: Add-ons ──────────────────────────────────────────────
+    addons: [
+      {
+        label:    { type: String },
+        sublabel: { type: String },
+        amount:   { type: Number },
+      },
+    ],
+    addonsAmount: { type: Number, default: 0 },
+
+    // Membership & Coupon
+    hasMembership:      { type: Boolean, default: false },
+    membershipFee:      { type: Number,  default: 0 },
+    couponCode:         { type: String,  default: null, uppercase: true },
+    couponDiscount:     { type: Number,  default: 0 },
+    membershipDiscount: { type: Number,  default: 0 },
+
     FormData: {
-      Title: {
-        type: String,
-        required: true,
-      },
-      first_name: {
-        type: String,
-        required: true,
-      },
-      last_name: {
-        type: String,
-        required: true,
-      },
-      certificate_name: {
-        type: String,
-        required: true,
-      },
+      Title:                 { type: String, required: true },
+      first_name:            { type: String, required: true },
+      last_name:             { type: String, required: true },
+      certificate_name:      { type: String, required: true },
       DOB: {
         type: Date,
         required: true,
         validate: {
-          validator: function (value) {
-            return value <= new Date();
-          },
+          validator: function (value) { return value <= new Date(); },
           message: "Date of Birth cannot be in the future",
         },
       },
-      nationality: {
-        type: String,
-        required: true,
-      },
-      department: {
-        type: String,
-        required: true,
-      },
-      institution: {
-        type: String,
-        required: true,
-      },
-      number: {
-        type: String,
-        required: true,
-      },
+      nationality:           { type: String, required: true },
+      department:            { type: String, required: true },
+      institution:           { type: String, required: true },
+      number:                { type: String, required: true },
       email: {
         type: String,
         required: true,
