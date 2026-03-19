@@ -25,7 +25,8 @@ const allowedOrigins = [
   "http://localhost:5173",
   "https://backendicsap.confworld.org",
   "https://icsap.co.in",
-  "http://icsap.co.in" // Add HTTP version too
+  "http://icsap.co.in",
+  "https://icsap.infinityuniquers.com"/// Add HTTP version too
 ];
 
 app.use(cors({
